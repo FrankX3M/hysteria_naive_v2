@@ -146,7 +146,14 @@ render_template() {
                 $SINGBOX_IMAGE $NAIVE_MEM_LIMIT $NAIVE_CPUS $SERVICE_USER $TOOLS_DIR $VENV_DIR
                 $STATE_DIR $CERT_DIR $NAIVE_DIR $HY2_CONFIG $NAIVE_CONFIG $USERS_JSON $SECRETS_ENV
                 $INSTALL_ENV $AUTHD_PORT $STATS_PORT $ADMIN_BIN $LOG_DIR $HOSTNAME_SHORT $NFT_FILE $BACKUP_DIR'
-    export SERVICE_USER TOOLS_DIR VENV_DIR STATE_DIR CERT_DIR NAIVE_DIR HY2_CONFIG NAIVE_CONFIG \
+    # envsubst — отдельный процесс: видит только ЭКСПОРТИРОВАННЫЕ переменные.
+    # При загрузке из install.env (load_env_file) экспорт уже сделан, но при свежей
+    # интерактивной установке (ask()/apply_defaults()) это обычные переменные шелла —
+    # без export ниже envsubst молча подставил бы их пустой строкой (было: пустые
+    # порты/домен в nftables и других шаблонах при первом запуске без install.env).
+    export SERVER_DOMAIN SERVER_IP MAIN_PORT HOP_START HOP_END SSH_PORT TLS_CERT TLS_KEY \
+           SINGBOX_IMAGE NAIVE_MEM_LIMIT NAIVE_CPUS AUTHD_PORT STATS_PORT \
+           SERVICE_USER TOOLS_DIR VENV_DIR STATE_DIR CERT_DIR NAIVE_DIR HY2_CONFIG NAIVE_CONFIG \
            USERS_JSON SECRETS_ENV INSTALL_ENV ADMIN_BIN LOG_DIR NFT_FILE BACKUP_DIR
     HOSTNAME_SHORT="$(hostname -s)"; export HOSTNAME_SHORT
     envsubst "$vars" < "$tpl"

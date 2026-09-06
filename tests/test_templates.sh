@@ -11,10 +11,12 @@ source "${REPO_DIR}/lib/common.sh"
 # shellcheck source=../lib/versions.sh
 source "${REPO_DIR}/lib/versions.sh"
 
+# Намеренно НЕ экспортируем эти переменные здесь: именно так они приходят из
+# collect_interactive()/ask() при свежей интерактивной установке (обычные переменные
+# шелла, без export). render_template() обязан сам экспортировать всё, что подставляет
+# envsubst — иначе шаблоны тихо получают пустые значения (см. lib/common.sh).
 SERVER_DOMAIN=proxy.example.com SERVER_IP=203.0.113.5 SSH_PORT=2222 TLS_CERT=/tmp/c.pem TLS_KEY=/tmp/k.pem
 apply_defaults
-export SERVER_DOMAIN SERVER_IP MAIN_PORT HOP_START HOP_END SSH_PORT TLS_CERT TLS_KEY SINGBOX_IMAGE NAIVE_MEM_LIMIT \
-       NAIVE_CPUS AUTHD_PORT STATS_PORT
 
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT" "$LOG_FILE"' EXIT
