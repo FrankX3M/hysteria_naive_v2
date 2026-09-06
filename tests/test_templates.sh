@@ -75,4 +75,26 @@ load_env_file "$OUT/env"
 ( SERVER_DOMAIN=proxy.example.com MAIN_PORT=30000 HOP_START=20000 HOP_END=50000 SSH_PORT=22 FIRST_USER=admin CERT_MODE=letsencrypt TG_TOKEN='' validate_params ) 2>/dev/null && { echo "FAIL порт в hopping не отловлен"; fail=1; } || echo "ok   validate_params отлавливает порт в диапазоне"
 ( SERVER_DOMAIN=proxy.example.com MAIN_PORT=443 HOP_START=20000 HOP_END=50000 SSH_PORT=22 FIRST_USER='Bad Name' CERT_MODE=letsencrypt TG_TOKEN='' validate_params ) 2>/dev/null && { echo "FAIL плохое имя"; fail=1; } || echo "ok   validate_params отлавливает имя"
 
+# Проверка «порт разрешён» не должна зависеть от формата вывода nft
+# (nft < 1.0 печатает имена служб: `tcp dport ssh accept`)
+source "${REPO_DIR}/lib/firewall.sh"
+json_fixture='{"nftables":[{"chain":{"name":"input"}},
+  {"rule":{"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":2222}},{"accept":null}]}},
+  {"rule":{"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":{"set":[80,8080]}}},{"accept":null}]}},
+  {"rule":{"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":9999}},{"drop":null}]}}]}'
+json_has_accept_port 2222 <<<"$json_fixture" && echo "ok   json: порт-число найден"      || { echo "FAIL json: 2222"; fail=1; }
+json_has_accept_port 8080 <<<"$json_fixture" && echo "ok   json: порт в set найден"      || { echo "FAIL json: set"; fail=1; }
+json_has_accept_port 9999 <<<"$json_fixture" && { echo "FAIL json: drop принят за accept"; fail=1; } || echo "ok   json: drop не считается accept"
+json_has_accept_port 22   <<<"$json_fixture" && { echo "FAIL json: лишний порт"; fail=1; } || echo "ok   json: отсутствующий порт не найден"
+old_nft='	chain input {
+		tcp dport ssh accept comment "ssh"
+		tcp dport http accept
+	}'
+svc="$(getent services 22/tcp | awk '{print $1}' || true)"
+grep -qE "tcp dport (22|${svc:-__no_service__})([[:space:],]|$).*accept" <<<"$old_nft" \
+    && echo "ok   текст: имя службы ssh распознано" || { echo "FAIL текст: имя службы"; fail=1; }
+svc="$(getent services 2222/tcp 2>/dev/null | awk '{print $1}' || true)"
+grep -qE "tcp dport (2222|${svc:-__no_service__})([[:space:],]|$).*accept" <<<"$old_nft" \
+    && { echo "FAIL текст: ложное срабатывание"; fail=1; } || echo "ok   текст: чужой порт не распознан"
+
 exit $fail
