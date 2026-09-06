@@ -6,7 +6,8 @@ Telegram-ботом, watchdog'ом, зашифрованными бэкапам�
 v3 — переработка v2 по итогам [архитектурного анализа](docs/ARCHITECTURE.md#что-изменилось-относительно-v2):
 модульный установщик, единый файл состояния `/etc/proxy/`, конфиги как производные артефакты,
 аутентификация Hysteria2 без рестартов, сервисы не от root, файрвол с `policy drop`.
-Как перейти с v2 — [docs/MIGRATION.md](docs/MIGRATION.md).
+Как перейти с v2 — [пошаговая инструкция для работающего сервера](docs/RUNBOOK.md)
+или [краткая справка по миграции](docs/MIGRATION.md).
 
 ## Содержание
 
@@ -96,7 +97,7 @@ tools/
   requirements.txt      пины python-зависимостей
 maintenance/            serveraudit.sh (read-only), servercleanup.sh + unit/timer
 tests/                  pytest (логика, authd, ссылки) + test_templates.sh (рендер, nft -c, юниты)
-docs/                   ARCHITECTURE.md, MIGRATION.md
+docs/                   RUNBOOK.md (пошаговый перевод сервера с v2), ARCHITECTURE.md, MIGRATION.md
 .github/workflows/ci.yml
 ```
 

@@ -23,7 +23,7 @@ done
 
 trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 
-VERSION="3.0.0"
+VERSION="3.0.1"
 CONFIG_FILE=""
 MODE="install"          # install | upgrade | reinstall
 FROM_STEP=""
