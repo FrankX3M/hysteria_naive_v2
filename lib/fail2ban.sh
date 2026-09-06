@@ -15,7 +15,9 @@ configure_fail2ban() {
     systemctl enable fail2ban >> "$LOG_FILE" 2>&1
     systemctl restart fail2ban
     if wait_active fail2ban 5; then
-        log_ok "Fail2ban запущен: $(fail2ban-client status 2>/dev/null | awk -F: '/Jail list/{print $2}' | xargs)"
+        local jails
+        jails="$(fail2ban-client status 2>/dev/null | awk -F: '/Jail list/{print $2}' | xargs 2>/dev/null || true)"
+        log_ok "Fail2ban запущен: ${jails}"
     else
         log_warn "Fail2ban не запустился: journalctl -xeu fail2ban"
     fi
