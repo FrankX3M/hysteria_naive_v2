@@ -23,7 +23,7 @@ done
 
 trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 
-VERSION="3.0.3"
+VERSION="3.0.4"
 CONFIG_FILE=""
 MODE="install"          # install | upgrade | reinstall
 FROM_STEP=""
@@ -159,7 +159,7 @@ main() {
     save_secrets_env
     log_ok "Параметры сохранены: ${INSTALL_ENV}, секреты: ${SECRETS_ENV}"
 
-    local started=0
+    local started=0 i
     [[ -z "$FROM_STEP" ]] && started=1
     for ((i = 0; i < ${#STEPS[@]}; i += 2)); do
         local name="${STEPS[i]}" cmd="${STEPS[i+1]}"
