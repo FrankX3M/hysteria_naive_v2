@@ -1,0 +1,5 @@
+# /etc/sudoers.d/proxyadmin — генерируется hysteria_naive (templates/sudoers-proxyadmin)
+# Бот (User=${SERVICE_USER}) может запускать ТОЛЬКО proxy-admin от root. Обёртка ${ADMIN_BIN}
+# принадлежит root и не редактируется сервисным пользователем; аргументы валидирует сам proxy-admin.
+Defaults:${SERVICE_USER} !requiretty, env_reset
+${SERVICE_USER} ALL=(root) NOPASSWD: ${ADMIN_BIN} *

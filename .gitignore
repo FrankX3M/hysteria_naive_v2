@@ -1,0 +1,9 @@
+install.env
+*.env
+!install.env.example
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.tar.gz
+*.gpg

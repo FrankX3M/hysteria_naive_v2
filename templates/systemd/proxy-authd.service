@@ -1,0 +1,28 @@
+[Unit]
+Description=Hysteria2 HTTP auth backend (reads ${USERS_JSON})
+After=network.target
+Before=hysteria-server.service
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+Group=${SERVICE_USER}
+ExecStart=${VENV_DIR}/bin/python ${TOOLS_DIR}/tools/proxy_authd.py
+Restart=always
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressAllow=localhost
+IPAddressDeny=any
+ReadOnlyPaths=${STATE_DIR}
+
+[Install]
+WantedBy=multi-user.target

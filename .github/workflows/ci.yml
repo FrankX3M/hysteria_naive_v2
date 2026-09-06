@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  shell:
+    name: shellcheck + template render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck nftables gettext-base python3-yaml
+      - name: shellcheck
+        run: shellcheck -S warning -x install.sh restore.sh lib/*.sh maintenance/*.sh templates/certbot-deploy-hook.sh tests/*.sh
+      - name: bash -n
+        run: bash -n install.sh restore.sh lib/*.sh maintenance/*.sh
+      - name: Render templates, nft -c, validate units
+        run: sudo -E bash tests/test_templates.sh
+
+  python:
+    name: ruff + pytest
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r tools/requirements-dev.txt
+      - run: ruff check tools tests
+      - run: python -m py_compile tools/*.py
+      - run: pytest -q tests
+
+  smoke-install:
+    name: install.sh --config in Debian container (dry syntax + help)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Help / list-steps must work without root and network
+        run: |
+          bash install.sh --help
+          bash install.sh --list-steps
+          bash restore.sh --help

@@ -1,0 +1,8 @@
+[Unit]
+Description=Proxy watchdog: health checks, auto-restart, Telegram alerts
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=${ADMIN_BIN} watchdog
+Nice=5

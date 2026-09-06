@@ -1,0 +1,24 @@
+[Unit]
+Description=Proxy Manager Telegram Bot
+After=network-online.target proxy-authd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+Group=${SERVICE_USER}
+ExecStart=${VENV_DIR}/bin/python ${TOOLS_DIR}/tools/proxy_bot.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+# Мутирующие операции идут через `sudo -n proxy-admin` (см. /etc/sudoers.d/proxyadmin).
+# Поэтому здесь НЕТ ProtectSystem=strict/NoNewPrivileges: sudo-потомок наследует mount
+# namespace юнита, и root не смог бы писать в /etc/proxy. Изоляция — на уровне sudoers.
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

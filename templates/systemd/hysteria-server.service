@@ -1,0 +1,31 @@
+[Unit]
+Description=Hysteria2 Server
+Documentation=https://v2.hysteria.network/
+After=network-online.target proxy-authd.service
+Wants=network-online.target proxy-authd.service
+
+[Service]
+Type=simple
+User=hysteria
+Group=hysteria
+WorkingDirectory=/var/lib/hysteria
+ExecStart=/usr/local/bin/hysteria server --config ${HY2_CONFIG}
+Restart=always
+RestartSec=5
+Environment=HYSTERIA_LOG_LEVEL=info
+
+# Бинарнику нужны только сетевые capability; от root не запускаем (п.18)
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadOnlyPaths=${CERT_DIR} /etc/hysteria
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

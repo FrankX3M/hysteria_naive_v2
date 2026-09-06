@@ -1,0 +1,24 @@
+# ${NAIVE_DIR}/docker-compose.yml — генерируется hysteria_naive (templates/docker-compose.yml)
+# Декларативное описание контейнера NaiveProxy (sing-box). Правки — в шаблоне репозитория.
+services:
+  naiveproxy:
+    image: ${SINGBOX_IMAGE}
+    container_name: naiveproxy
+    command: ["run", "-c", "/etc/sing-box/config.json"]
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ${NAIVE_DIR}/config:/etc/sing-box:ro
+      - ${CERT_DIR}:/etc/proxy/certs:ro
+    # Лимиты ресурсов: на VPS с 1 ГБ RAM неограниченный контейнер — источник OOM (п.10)
+    mem_limit: ${NAIVE_MEM_LIMIT}
+    cpus: ${NAIVE_CPUS}
+    # journald, чтобы логи были в journalctl вместе с остальными сервисами (п.11)
+    logging:
+      driver: journald
+      options:
+        tag: naiveproxy

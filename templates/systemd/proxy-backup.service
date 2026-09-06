@@ -1,0 +1,10 @@
+[Unit]
+Description=Proxy encrypted backup (local rotation + Telegram)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${ADMIN_BIN} backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

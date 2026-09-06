@@ -1,0 +1,11 @@
+[Unit]
+Description=Запускать server-cleanup.service раз в день
+
+[Timer]
+# 03:30 — не пересекается с apt-daily/apt-daily-upgrade/man-db (~04:49-06:09)
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

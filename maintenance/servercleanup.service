@@ -1,0 +1,11 @@
+[Unit]
+Description=Ежедневная безопасная очистка диска
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/servercleanup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

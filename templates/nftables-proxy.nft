@@ -1,0 +1,39 @@
+#!/usr/sbin/nft -f
+# ${NFT_FILE} — генерируется hysteria_naive (templates/nftables-proxy.nft).
+#
+# Принципы (п.4 рекомендаций и уточнения к нему):
+#   * Только СВОЯ таблица `inet proxy`: никакого `flush ruleset`, чтобы не сносить
+#     таблицы Fail2ban (f2b-table) и Docker (iptables-nft). Применять так:
+#       nft -c -f ${NFT_FILE} && nft -f ${NFT_FILE}
+#   * Семейство inet — правила одинаковы для IPv4 и IPv6 (включая NAT-редирект hopping).
+#   * Политика input — drop. Явно разрешено: loopback, established/related, ICMP,
+#     SSH (${SSH_PORT}), tcp/80 (certbot standalone + автопродление), основной порт
+#     ${MAIN_PORT} tcp+udp. Диапазон hopping ${HOP_START}-${HOP_END} НЕ нужно
+#     открывать в input: prerouting-редирект уже переписал dport на ${MAIN_PORT}.
+
+table inet proxy
+flush table inet proxy
+
+table inet proxy {
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+        udp dport ${HOP_START}-${HOP_END} redirect to :${MAIN_PORT}
+        tcp dport ${HOP_START}-${HOP_END} redirect to :${MAIN_PORT}
+    }
+
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        iif "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+
+        ip protocol icmp accept
+        ip6 nexthdr ipv6-icmp accept
+
+        tcp dport ${SSH_PORT} accept comment "ssh"
+        tcp dport 80 accept comment "certbot http-01"
+        tcp dport ${MAIN_PORT} accept comment "naiveproxy / hysteria main"
+        udp dport ${MAIN_PORT} accept comment "hysteria main + hopping after redirect"
+    }
+}

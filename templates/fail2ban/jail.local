@@ -1,0 +1,22 @@
+# /etc/fail2ban/jail.local — генерируется hysteria_naive (templates/fail2ban/jail.local)
+[DEFAULT]
+bantime  = 1h
+findtime = 10m
+maxretry = 5
+backend  = systemd
+# Бан по IP на всех портах через nftables: не зависит от NAT-редиректа hopping-диапазона
+banaction = nftables[type=allports]
+banaction_allports = nftables[type=allports]
+
+[sshd]
+enabled = true
+port    = ${SSH_PORT}
+
+[hysteria2]
+enabled  = true
+filter   = hysteria2
+backend  = systemd
+journalmatch = _SYSTEMD_UNIT=proxy-authd.service
+maxretry = 10
+findtime = 5m
+bantime  = 2h
