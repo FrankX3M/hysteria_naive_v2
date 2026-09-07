@@ -633,10 +633,24 @@ def backup(cfg: Config, paths: Paths, send: bool = True) -> Path:
     out = tar_path
     if cfg.backup_passphrase and shutil.which("gpg"):
         enc = tar_path.with_suffix(".gz.gpg")
-        r = subprocess.run(["gpg", "--batch", "--yes", "--symmetric", "--cipher-algo", "AES256",
-                            "--passphrase-fd", "0", "-o", str(enc), str(tar_path)],
-                           input=cfg.backup_passphrase, capture_output=True, text=True, timeout=120)
+        # gpg по умолчанию создаёт ~/.gnupg. Через бота команда идёт как
+        # `sudo -n proxy-admin backup` из юнита с ProtectHome=true, где /root
+        # недоступен (Read-only file system). Поэтому даём gpg собственный
+        # временный homedir — симметричному шифрованию keyring не нужен.
+        with tempfile.TemporaryDirectory(prefix="proxy-gpg-", dir=str(paths.backup_dir)) as gh:
+            os.chmod(gh, 0o700)
+            genv = {**os.environ, "GNUPGHOME": gh}
+            r = subprocess.run(["gpg", "--homedir", gh, "--batch", "--yes", "--symmetric",
+                                "--cipher-algo", "AES256", "--passphrase-fd", "0",
+                                "-o", str(enc), str(tar_path)],
+                               input=cfg.backup_passphrase, capture_output=True, text=True,
+                               timeout=120, env=genv)
+            # gpg 2.x поднимает gpg-agent даже для --symmetric; гасим его,
+            # чтобы он не держал сокет во временном homedir.
+            subprocess.run(["gpgconf", "--homedir", gh, "--kill", "all"],
+                           env=genv, capture_output=True, timeout=30)
         if r.returncode != 0:
+            tar_path.unlink(missing_ok=True)
             raise SystemExit("gpg не смог зашифровать бэкап: " + r.stderr.strip())
         tar_path.unlink()
         os.chmod(enc, 0o600)
