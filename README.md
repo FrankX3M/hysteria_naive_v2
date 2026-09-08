@@ -1,5 +1,5 @@
 # hysteria_naive v2
-
+*[Английская версия / English version](README.en.md)*
 Установщик и инструменты управления связкой **Hysteria2 + NaiveProxy (sing-box в Docker)** с port hopping,
 Telegram-ботом, watchdog'ом, зашифрованными бэкапами, Fail2ban и nftables-файрволом.
 
