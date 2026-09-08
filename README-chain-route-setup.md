@@ -1,5 +1,7 @@
 # chain-route-setup.sh
 
+*[Английская версия / English version](README-chain-route-setup.en.md)*
+
 Дополнительный скрипт для проекта [hysteria_naive_v2](https://github.com/FrankX3M/hysteria_naive_v2).
 Превращает установленный сервер в **мост на второй сервер** с гео-маршрутизацией:
 указанные страны и домены идут напрямую, всё остальное — через SOCKS5/HTTP-туннель
