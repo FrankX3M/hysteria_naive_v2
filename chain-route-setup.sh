@@ -13,11 +13,18 @@
 #      который идёт напрямую с этого сервера;
 #      резолвинг доменов на обоих outbound'ах принудительно IPv4-only
 #      (domain_resolver), чтобы клиент не улетал на IPv6 по своей DNS-логике;
+#   1a) опционально: список доменов, которые ПРИНУДИТЕЛЬНО идут через цепочку,
+#      даже если попадают под .ru/geoip:ru (например gosuslugi.ru) — правило
+#      ставится раньше direct-правил в обоих движках;
 #   1b) патчит render_hysteria() в том же файле так, чтобы нативный Hysteria2-вход
 #      (hysteria-server, профили admin-HY2/test-HY2) применял ТУ ЖЕ самую политику
 #      (те же домены/страны — direct, остальное — в тот же SOCKS5-туннель) через
 #      нативные outbounds/acl.inline самого Hysteria2, той же geoip-базой (единый
 #      geoip.dat, скачивается один раз, отдельно от sing-geoip *.srs для sing-box);
+#      включает серверный sniff Hysteria2 (нужна версия >= 2.6.0) — без него ACL
+#      по доменам не работает для клиентов, которые резолвят DNS сами и шлют IP;
+#   1c) опционально: reject BitTorrent на NaiveProxy-входе (sing-box определяет
+#      протокол через sniff), чтобы торренты не улетали через второй сервер;
 #   2) сам находит установленную копию proxy_admin.py и папку конфига NaiveProxy;
 #   3) качает актуальные GeoIP-базы: rule-set *.srs для sing-box (sing-geoip,
 #      ветка rule-set) и geoip.dat для нативного Hysteria2 (Loyalsoldier/geoip);
@@ -45,6 +52,9 @@ MARK_END_HY="    # ==== END HYSTERIA_NAIVE_CHAIN_ROUTE_HY2 ===="
 HY_CLIENT_CONFIG="/etc/hysteria/client.yaml"
 HY_CLIENT_UNIT="/etc/systemd/system/hysteria-client.service"
 HY_SERVER_GEOIP="/etc/hysteria/geoip.dat"
+# Дефолтный список доменов «напрямую». youtube.com обязателен — без него сам
+# youtube.com (в т.ч. redirector.c.youtube.com) уходит через цепочку.
+DOM_DEFAULT=".ru,.su,.рф,youtube.com,youtu.be,googlevideo.com,ytimg.com,youtube-nocookie.com,ggpht.com,youtubei.googleapis.com,youtube.googleapis.com,youtubekids.com,youtubeeducation.com,gvt1.com,gvt2.com,gvt3.com,video.google.com"
 
 log()  { echo -e "\033[1;36m[*]\033[0m $*"; }
 ok()   { echo -e "\033[1;32m[OK]\033[0m $*"; }
@@ -239,13 +249,44 @@ if [ "$MODE" = "setup" ]; then
     read -rp "Адрес (обычно локальный Hysteria-клиент) [${CHAIN_HOST}]: " h; CHAIN_HOST="${h:-$CHAIN_HOST}"
     read -rp "Порт [${CHAIN_PORT}]: " po; CHAIN_PORT="${po:-$CHAIN_PORT}"
     read -rp "Код(ы) стран для GeoIP-direct через запятую [ru]: " GEO_IN; GEO_IN="${GEO_IN:-ru}"
-    read -rp "Доп. домены напрямую через запятую [.ru,.su,.рф,youtube.com,youtu.be,googlevideo.com,ytimg.com,youtube-nocookie.com,ggpht.com]: " DOM_IN
-    DOM_IN="${DOM_IN:-.ru,.su,.рф,youtube.com,youtu.be,googlevideo.com,ytimg.com,youtube-nocookie.com,ggpht.com}"
+    echo
+    log "Домены напрямую. Дефолт: ${DOM_DEFAULT}"
+    log "Если хочешь ДОБАВИТЬ к дефолту — начни ввод с '+' (например: +vk.com,mail.ru);"
+    log "без '+' введённый список ПОЛНОСТЬЮ заменяет дефолт (следи, чтобы youtube.com не потерялся)."
+    read -rp "Домены напрямую [Enter = дефолт]: " DOM_IN
+    if [ -z "$DOM_IN" ]; then
+        DOM_IN="$DOM_DEFAULT"
+    elif [[ "$DOM_IN" == +* ]]; then
+        DOM_IN="${DOM_DEFAULT},${DOM_IN#+}"
+    fi
+    echo
+    log "Домены ПРИНУДИТЕЛЬНО через цепочку (второй сервер), даже если они .ru / в GeoIP-стране."
+    log "Например, gosuslugi.ru,gu-st.ru. Пусто — не нужно."
+    read -rp "Домены через цепочку [пусто]: " CHAIN_DOM_IN; CHAIN_DOM_IN="${CHAIN_DOM_IN:-}"
+    echo
+    read -rp "Блокировать BitTorrent на NaiveProxy-входе (reject, чтобы торренты не шли через второй сервер)? [y/N]: " bt
+    BLOCK_BT=0; [[ "${bt,,}" == "y" ]] && BLOCK_BT=1
 else
     # --only-geoip: параметры маршрутизации не нужны, страны возьмём из уже применённого патча
     GEO_IN="$(grep -oP '"tag":\s*"geoip-\K[a-z]+' "$REPO_PY" | paste -sd, -)"
     [ -n "$GEO_IN" ] || die "Патч ещё не применён — сначала запусти без --only-geoip"
-    DOM_IN=""
+    DOM_IN=""; CHAIN_DOM_IN=""; BLOCK_BT=0
+fi
+
+# ── версия hysteria: серверный sniff появился в 2.6.0 ─────────────────
+HY_SNIFF=0
+HY_VER="$(hysteria version 2>/dev/null | grep -oP 'v?\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+if [ -n "$HY_VER" ]; then
+    if [ "$(printf '%s\n' "2.6.0" "$HY_VER" | sort -V | head -1)" = "2.6.0" ]; then
+        HY_SNIFF=1
+        log "hysteria $HY_VER — серверный sniff поддерживается, включаю его для hysteria-server."
+    else
+        err "hysteria $HY_VER < 2.6.0 — серверный sniff недоступен. Клиенты HY2-профилей, которые"
+        err "резолвят DNS сами (шлют IP вместо домена), НЕ попадут под доменные правила — только под GeoIP."
+        err "Обнови hysteria: bash <(curl -fsSL https://get.hy2.sh/)"
+    fi
+else
+    err "Не смог определить версию hysteria (команда 'hysteria version') — sniff для hysteria-server не включаю."
 fi
 
 IFS=',' read -ra GEO_CODES <<< "$GEO_IN"
@@ -297,20 +338,32 @@ fi
 }
 
 # ── собираем JSON-параметры для python-патчера ─────────────────────────
-PARAMS_JSON="$(python3 - "$CHAIN_TYPE" "$CHAIN_HOST" "$CHAIN_PORT" "$GEO_IN" "$DOM_IN" <<'PYEOF'
+PARAMS_JSON="$(python3 - "$CHAIN_TYPE" "$CHAIN_HOST" "$CHAIN_PORT" "$GEO_IN" "$DOM_IN" "$CHAIN_DOM_IN" "$BLOCK_BT" "$HY_SNIFF" <<'PYEOF'
 import json, sys
-chain_type, chain_host, chain_port, geo_in, dom_in = sys.argv[1:6]
-countries = [c.strip() for c in geo_in.split(",") if c.strip()]
-domains   = [d.strip() for d in dom_in.split(",") if d.strip()]
+chain_type, chain_host, chain_port, geo_in, dom_in, chain_dom_in, block_bt, hy_sniff = sys.argv[1:9]
+def split(s):
+    out = []
+    for x in s.split(","):
+        x = x.strip()
+        if x and x not in out:   # без дублей, порядок сохраняем
+            out.append(x)
+    return out
+countries     = split(geo_in)
+domains       = split(dom_in)
+chain_domains = split(chain_dom_in)
 print(json.dumps({
     "chain_type": chain_type,
     "chain_host": chain_host,
     "chain_port": int(chain_port),
     "countries": countries,
     "domains": domains,
+    "chain_domains": chain_domains,
+    "block_bt": block_bt == "1",
+    "hy_sniff": hy_sniff == "1",
 }))
 PYEOF
 )"
+log "Итоговые параметры: $PARAMS_JSON"
 
 cp "$REPO_PY" "${REPO_PY}.bak-$(date +%Y%m%d-%H%M%S)"
 
@@ -337,6 +390,19 @@ def build_block():
     rule_set_fmt = "\n".join(rule_set)
     tags_fmt = ", ".join(json.dumps(t) for t in rule_tags)
 
+    # Правила, идущие СРАЗУ после sniff, до direct-правил (первое совпадение выигрывает):
+    #   — reject BitTorrent (если включено);
+    #   — принудительно через цепочку (gosuslugi.ru и т.п.), даже если .ru / geoip:ru.
+    pre_rules = []
+    if p["block_bt"]:
+        pre_rules.append('                {"protocol": "bittorrent", "action": "reject"},')
+    if p["chain_domains"]:
+        pre_rules.append(
+            '                {"domain_suffix": [%s], "outbound": "chain-fin"},'
+            % ", ".join(json.dumps(d) for d in p["chain_domains"])
+        )
+    pre_rules_fmt = ("\n".join(pre_rules) + "\n") if pre_rules else ""
+
     block = f'''{mb}
         "dns": {{"servers": [{{"type": "local", "tag": "local"}}]}},
         "outbounds": [
@@ -355,7 +421,7 @@ def build_block():
             ],
             "rules": [
                 {{"action": "sniff"}},
-                {{
+{pre_rules_fmt}                {{
                     "domain_suffix": [
 {domains_fmt},
                     ],
@@ -419,6 +485,12 @@ def build_block_hy():
         )
 
     inline = []
+    # Сначала — принудительно через цепочку (правила проверяются по порядку,
+    # срабатывает первое совпадение, поэтому они должны стоять ДО direct(...)).
+    for d in p["chain_domains"]:
+        d = d.lstrip(".")
+        if d:
+            inline.append('            %s,' % json.dumps(f"chain_fin(suffix:{d})"))
     for d in p["domains"]:
         d = d.lstrip(".")
         if d:
@@ -428,8 +500,17 @@ def build_block_hy():
     inline.append('            "chain_fin(all)",')
     inline_fmt = "\n".join(inline)
 
+    # Серверный sniff (Hysteria2 >= 2.6.0): ACL видит реальный домен из TLS SNI /
+    # HTTP Host / QUIC даже если клиент прислал голый IP (резолвил DNS сам).
+    # rewriteDomain: false — домен только для матчинга, соединение идёт на тот
+    # адрес, который прислал клиент (как sniff в sing-box без override).
+    sniff_fmt = ""
+    if p["hy_sniff"]:
+        sniff_fmt = ('    doc["sniff"] = {"enable": True, "timeout": "2s", "rewriteDomain": False,\n'
+                     '                    "tcpPorts": "all", "udpPorts": "all"}\n')
+
     block = f'''{mb}
-    doc["outbounds"] = [
+{sniff_fmt}    doc["outbounds"] = [
 {outbound_fmt}
     ]
     doc["acl"] = {{
@@ -487,6 +568,9 @@ cp "$REPO_PY" "$INSTALLED_PY"
 log "Применяю (proxy-admin apply)..."
 if proxy-admin apply; then
     ok "Готово! Оба входа (NaiveProxy и Hysteria2) заворачивают трафик в ${CHAIN_TYPE}://${CHAIN_HOST}:${CHAIN_PORT}, страны [${GEO_IN}] и домены [${DOM_IN}] идут напрямую."
+    [ -n "$CHAIN_DOM_IN" ] && ok "Принудительно через цепочку: [${CHAIN_DOM_IN}]"
+    [ "$BLOCK_BT" -eq 1 ] && ok "BitTorrent на NaiveProxy-входе: reject"
+    [ "$HY_SNIFF" -eq 1 ] && ok "Hysteria2 sniff: включён" || err "Hysteria2 sniff: НЕ включён (см. предупреждение выше)"
     echo
     echo "Проверка:"
     echo "  systemctl status hysteria-client hysteria-server"
