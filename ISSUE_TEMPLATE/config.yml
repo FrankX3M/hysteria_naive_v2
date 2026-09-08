@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Вопросы по использованию
+    url: https://github.com/FrankX3M/hysteria_naive_v2/discussions
+    about: Если это не баг и не предложение фичи, а вопрос "как настроить X" — используйте Discussions.
