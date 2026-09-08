@@ -41,7 +41,19 @@
    нативным для Hysteria2 механизмом (`outbounds` + `acl.inline`), чтобы
    вход `hysteria-server` (профили `admin-HY2`/`test-HY2`) вёл себя
    идентично NaiveProxy-входу: те же домены и страны — напрямую, всё
-   остальное — в тот же локальный SOCKS5/HTTP туннель из шага 1.
+   остальное — в тот же локальный SOCKS5/HTTP туннель из шага 1. Включает
+   серверный `sniff` Hysteria2 (нужна версия **≥ 2.6.0**) — без него ACL по
+   доменам не срабатывает для клиентов, которые резолвят DNS сами и шлют
+   на сервер голый IP (см. «Важные детали»).
+3a. **Опционально — домены принудительно через цепочку.** Список доменов,
+   которые должны идти через второй сервер, даже если попадают под `.ru` или
+   GeoIP-страну (например `gosuslugi.ru`). Правило ставится в обоих движках
+   *раньше* direct-правил.
+3b. **Опционально — reject BitTorrent** на NaiveProxy-входе (sing-box
+   определяет протокол через `sniff`), чтобы торренты не улетали через
+   второй сервер и не собирали abuse-жалобы от зарубежного хостера.
+   На Hysteria2-входе такого правила нет — там ACL не умеет матчить по
+   протоколу, отключай прокси в самом торрент-клиенте.
 4. Сам находит установленную копию `proxy_admin.py` (через `/usr/local/bin/proxy-admin`)
    и папку конфига NaiveProxy (через `docker inspect naiveproxy`) — руками
    указывать пути не нужно.
@@ -82,7 +94,21 @@ sudo bash chain-route-setup.sh
 | Тип цепочки — socks/http | `socks` (адрес и порт клиента из шага 1) |
 | Адрес/порт прокси второго сервера | `127.0.0.1:1080` |
 | Коды стран для GeoIP-direct (через запятую) | `ru` |
-| Домены напрямую (через запятую) | `.ru,.su,.рф,youtube.com,youtu.be,googlevideo.com,ytimg.com,youtube-nocookie.com,ggpht.com` |
+| Домены напрямую (через запятую) | `.ru,.su,.рф,youtube.com,youtu.be,googlevideo.com,ytimg.com,youtube-nocookie.com,ggpht.com,youtubei.googleapis.com,youtube.googleapis.com,youtubekids.com,youtubeeducation.com,gvt1.com,gvt2.com,gvt3.com,video.google.com` |
+| Домены принудительно через цепочку | — (пусто; пример: `gosuslugi.ru,gu-st.ru`) |
+| Блокировать BitTorrent на NaiveProxy-входе | `N` |
+
+Про поле «Домены напрямую»: введённый список **полностью заменяет** дефолт.
+Чтобы просто *добавить* домены к дефолтному списку, начни ввод с `+`:
+`+vk.com,mail.ru`. Типичная ошибка при ручной вставке — потерять `youtube.com`
+из начала списка; тогда сам `youtube.com` (в т.ч. `redirector.c.youtube.com`)
+уходит через цепочку, хотя `googlevideo.com` идёт напрямую. Скрипт печатает
+итоговые параметры перед применением — сверь их.
+
+`gstatic.com`, `googleusercontent.com`, `googleapis.com` в дефолт намеренно
+не включены: это общая инфраструктура Google (Gmail, Drive, Play, поиск),
+и добавив их, ты пустишь напрямую с Сервера1 гораздо больше, чем YouTube.
+Видео без них играет нормально.
 
 Если Hysteria-клиент к второму серверу уже настроен и работает — скрипт
 спросит, перенастраивать ли его новой ссылкой, а не полезет менять молча.
@@ -145,6 +171,19 @@ docker restart naiveproxy
   одинаковый для всех клиентов (мобильных и десктопных) — это то, что
   чинит `domain_resolver: ipv4_only`.
 
+Быстрый тест обеих веток из консоли клиента (через прокси):
+
+```bash
+curl -s https://api.ipify.org                                      # → IP Сервера2 (цепочка)
+curl -s http://redirector.c.youtube.com/report_mapping | head -c 120  # → IP Сервера1 (direct)
+```
+
+`redirector.c.youtube.com/report_mapping` возвращает IP, с которого Google
+видит запрос, — удобно, чтобы проверить именно YouTube-ветку. Ошибка
+`curl: (23) Failure writing output` при `| head` — безобидна (head закрыл пайп).
+Прогнать тест стоит с **обоих** типов клиентов — NaiveProxy и HY2-профиль,
+они идут через разные движки правил.
+
 ## Важные детали реализации
 
 - **Почему нужен `sniff`.** NaiveProxy — это HTTP CONNECT-туннель. Часть
@@ -179,11 +218,37 @@ docker restart naiveproxy
   проектов — `render_singbox()` генерирует JSON для `sing-box`
   (`route.rules`/`rule_set`), `render_hysteria()` — YAML для официального
   бинаря `hysteria` (`acl.inline`, правила вида `direct(suffix:example.com)`,
-  `direct(geoip:ru)`, последним всегда идёт catch-all `chain-fin(all)`,
-  правила проверяются по порядку, срабатывает первое совпадение). `sniff`
-  на стороне Hysteria2 не нужен отдельно — ACL там всегда смотрит на
-  SNI/домен из TLS ClientHello, если он есть, это встроенное поведение,
-  а не отдельная опция.
+  `direct(geoip:ru)`, последним всегда идёт catch-all `chain_fin(all)`,
+  правила проверяются по порядку, срабатывает первое совпадение). Имя
+  outbound'а — `chain_fin` с подчёркиванием: ACL-парсер Hysteria2 не
+  принимает дефис в имени, `chain-fin(all)` падает с `invalid syntax`.
+- **Почему у Hysteria2 нужен серверный `sniff`.** В отличие от sing-box,
+  ACL Hysteria2 по умолчанию матчит только то, что прислал клиент в запросе
+  на соединение. Многие HY2-клиенты (в т.ч. десктопные с системным TUN)
+  резолвят DNS сами и шлют серверу голый IP — тогда `direct(suffix:...)`
+  не с чем сравнивать, `geoip:ru` для адреса Google не совпадает, и YouTube
+  уходит в `chain_fin(all)`. В логе `hysteria-server` это видно как
+  `reqAddr` с IP-адресами вместо доменов. Начиная с Hysteria 2.6.0 есть
+  серверная опция `sniff` (HTTP Host / TLS SNI / QUIC), скрипт включает её
+  с `rewriteDomain: false` — домен используется только для ACL, соединение
+  идёт на тот адрес, который прислал клиент (аналог `sniff` без override в
+  sing-box). Если `hysteria version` < 2.6.0, скрипт предупредит и sniff не
+  включит — обнови бинарь (`bash <(curl -fsSL https://get.hy2.sh/)`).
+- **Почему домены «принудительно через цепочку» стоят первыми.** В обоих
+  движках побеждает первое совпавшее правило. `gosuslugi.ru` попадает и под
+  `.ru`, и под `geoip:ru`, поэтому единственный способ отправить его на
+  Сервер2 — правило `chain-fin`/`chain_fin(suffix:...)` до всех direct-правил.
+  Учти, что ряд российских сервисов (Госуслуги/ЕСИА в том числе) периодически
+  ограничивают доступ с зарубежных IP — тогда получишь заглушку или капчу;
+  это не ошибка маршрутизации.
+- **Права на `geoip.dat`.** `hysteria-server` в проекте работает под
+  пользователем `hysteria` в песочнице systemd (`ProtectSystem=strict`,
+  `ReadOnlyPaths=/etc/hysteria`). Файл `/etc/hysteria/geoip.dat` должен быть
+  читаем этим пользователем — скрипт ставит `644`. Если файл окажется
+  `640 root:root` (например, после ручного `mv` из `/tmp`), сервер уйдёт в
+  цикл перезапуска с `open /etc/hysteria/geoip.dat: permission denied`, причём
+  откат `proxy-admin apply` на предыдущий конфиг **не поможет** — старый конфиг
+  ссылается на тот же файл. Лечится `chmod 644 /etc/hysteria/geoip.dat`.
 - **Синтаксис sing-box меняется между версиями.** Скрипт написан под
   синтаксис sing-box 1.13.x: `action: "sniff"` в `route.rules` (не
   `sniff`/`sniff_override_destination` на inbound — убраны в 1.13) и
@@ -194,6 +259,36 @@ docker restart naiveproxy
   скрипт нужно будет поправить под новый синтаксис (обычно `sing-box`
   прямо в тексте ошибки даёт ссылку на актуальный раздел миграции:
   `https://sing-box.sagernet.org/migration/`).
+
+## Типичные проблемы
+
+**`proxy-admin apply` пишет «hysteria-server не поднялся с новым конфигом — откатил».**
+Смотри `journalctl -u hysteria-server -n 40 --no-pager`. Частые причины:
+`permission denied` на `geoip.dat` (см. выше, `chmod 644`); `invalid syntax`
+в `acl.inline` — обычно дефис в имени outbound'а или опечатка в домене.
+После `apply` обязательно проверь `systemctl is-active hysteria-server`:
+если там `activating`, сервер лежит в цикле перезапусков, и HY2-профили
+не работают, хотя NaiveProxy-вход жив.
+
+**YouTube идёт через Сервер2 с HY2-клиента, но напрямую с NaiveProxy.**
+Это симптом отсутствующего `sniff` на Hysteria2-стороне: в
+`journalctl -u hysteria-server -f` `reqAddr` — голые IP. Проверь
+`hysteria version` (нужно ≥ 2.6.0) и `grep -A3 '^sniff:' /etc/hysteria/config.yaml`.
+
+**YouTube идёт через Сервер2 с обоих клиентов.** Скорее всего, из списка
+доменов выпал `youtube.com`. Проверь:
+`grep -c '"youtube.com"' /opt/naiveproxy/config/config.json` и
+`grep -c 'suffix:youtube.com)' /etc/hysteria/config.yaml` — оба должны дать `1`.
+
+**В логах много `bittorrent` / `TCP error ... i/o timeout` на порты 6881, 51413.**
+Кто-то из клиентов гоняет торрент-клиент через прокси; зарубежные пиры уходят
+через Сервер2. Либо включи reject BitTorrent в скрипте (NaiveProxy-вход), либо
+выключи прокси в торрент-клиенте.
+
+**Ручные правки блока между маркерами пропадают.** Так и задумано: любой
+запуск скрипта пересобирает оба блока целиком. Всё, что хочется сохранить,
+должно быть параметром скрипта (домены, страны, принудительная цепочка,
+BitTorrent), а не правкой `proxy_admin.py` руками.
 
 ## Резервные копии
 
