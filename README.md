@@ -1,4 +1,14 @@
 # hysteria_naive v2
+
+[![License: MIT](https://img.shields.io/github/license/FrankX3M/hysteria_naive_v2?color=blue)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/FrankX3M/hysteria_naive_v2)](https://github.com/FrankX3M/hysteria_naive_v2/commits/main)
+[![CI](https://img.shields.io/github/actions/workflow/status/FrankX3M/hysteria_naive_v2/ci.yml?branch=main&label=CI)](https://github.com/FrankX3M/hysteria_naive_v2/actions/workflows/ci.yml)
+[![Bash](https://img.shields.io/badge/shell-bash-4EAA25?logo=gnubash&logoColor=white)](install.sh)
+[![Python 3](https://img.shields.io/badge/python-3-3776AB?logo=python&logoColor=white)](tools/)
+[![Platform: Debian | Ubuntu](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-informational)](#%D1%82%D1%80%D0%B5%D0%B1%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D1%8F)
+[![Lint: ruff · shellcheck](https://img.shields.io/badge/lint-ruff%20%7C%20shellcheck-informational)](#%D1%80%D0%B0%D0%B7%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%BA%D0%B0-%D0%B8-ci)
+[![Open issues](https://img.shields.io/github/issues/FrankX3M/hysteria_naive_v2)](https://github.com/FrankX3M/hysteria_naive_v2/issues)
+
 *[Английская версия / English version](README.en.md)*
 
 Установщик и инструменты управления связкой **Hysteria2 + NaiveProxy (sing-box в Docker)** с port hopping,
