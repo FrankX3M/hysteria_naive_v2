@@ -1,0 +1,278 @@
+# chain-route-setup.sh
+
+*[Русская версия / Russian version](README-chain-route-setup.md)*
+
+An additional script for the [hysteria_naive_v2](https://github.com/FrankX3M/hysteria_naive_v2) project.
+Transforms an installed server into **a bridge to a second server** with geo-routing:
+specified countries and domains go directly, everything else—through a SOCKS5/HTTP tunnel
+to the second server. Patches **both** project entry points—NaiveProxy (`sing-box`) and
+native Hysteria2 (`hysteria-server`, profiles `admin-HY2`/`test-HY2`)—with the same
+domain/country policy, so it doesn't matter which protocol a particular client uses.
+
+Typical architecture:
+
+```
+                       ┌─(NaiveProxy)──┐
+Client ────────────────┤               ├──▶ Server1 (RU) ──(GeoIP/domain routing)──┬──▶ .ru / .su / .рф / YouTube — direct
+                       └─(Hysteria2)───┘                                            └──▶ everything else — through Hysteria2 tunnel
+                                                                                          to Server2 (e.g., foreign)
+```
+
+## What it does
+
+1. **Configures local Hysteria2 client** on Server1—prompts to insert
+   `hysteria2://...`/`hy2://...` link from Server2, installs `hysteria`,
+   generates `/etc/hysteria/client.yaml`, brings up `hysteria-client.service`
+   (systemd), and verifies the tunnel actually works.
+2. **Patches `render_singbox()`** in the project's `tools/proxy_admin.py` so the
+   NaiveProxy entry:
+   - wraps all outgoing traffic in the SOCKS5/HTTP client from step 1;
+   - routes (`direct`) traffic belonging to specified countries—by current GeoIP
+     database (`sing-geoip`, `rule-set` branch);
+   - routes direct domains from the exclusion list (default: `.ru`, `.su`, `.рф`,
+     and YouTube domains—customizable);
+   - determines actual domain via SNI/Host through `sniff`, even if client sends
+     bare IP instead of domain (important—some VPN/proxy clients resolve DNS
+     locally and send IP to server, making domain-based routing ineffective
+     without sniff);
+   - resolves domains for both outbounds strictly to IPv4 (`domain_resolver:
+     ipv4_only`) to prevent inconsistency—where some clients get IPv4 server
+     address and others get IPv6.
+3. **Patches `render_hysteria()`** in the same file—with the same policy, but
+   using Hysteria2's native mechanism (`outbounds` + `acl.inline`), so the
+   `hysteria-server` entry (profiles `admin-HY2`/`test-HY2`) behaves identically
+   to NaiveProxy: same domains and countries—direct, everything else—to the same
+   local SOCKS5/HTTP tunnel from step 1. Enables Hysteria2 server-side `sniff`
+   (requires version **≥ 2.6.0**)—without it, ACL by domain doesn't work for
+   clients that resolve DNS locally and send bare IP (see "Implementation
+   Details").
+3a. **Optional—force domains through chain.** List of domains that must go
+   through the second server even if matching `.ru` or GeoIP-country (e.g.,
+   `gosuslugi.ru`). Rule placed in both engines *before* direct rules.
+3b. **Optional—reject BitTorrent** on NaiveProxy entry (sing-box detects
+   protocol via `sniff`), so torrents don't leak through the second server and
+   trigger abuse complaints from foreign hosting. Hysteria2 entry has no such
+   rule—its ACL can't match by protocol; disable proxy in the torrent client
+   itself.
+4. Auto-locates installed `proxy_admin.py` (via `/usr/local/bin/proxy-admin`)
+   and NaiveProxy config folder (via `docker inspect naiveproxy`)—no manual
+   path configuration needed.
+5. Downloads current GeoIP databases: `geoip-<cc>.srs` for sing-box (`sing-geoip`)
+   and single `geoip.dat` for native Hysteria2 (`Loyalsoldier/geoip`).
+6. Patches **idempotently**—all added code in both functions wrapped with markers
+   (`HYSTERIA_NAIVE_CHAIN_ROUTE` for `render_singbox()`,
+   `HYSTERIA_NAIVE_CHAIN_ROUTE_HY2` for `render_hysteria()`). Subsequent runs
+   fully rebuild both blocks with new parameters (server change, country addition,
+   etc.), not creating duplicates or requiring byte-exact old text matching.
+7. Syncs patch to installed copy (`/opt/proxy/tools/proxy_admin.py`) and calls
+   `proxy-admin apply`. This command validates both configs before applying—if
+   something's invalid, nothing breaks, old working version stays active, script
+   exits with error and prints exact reason.
+
+## Requirements
+
+- Same VDS where `hysteria_naive_v2` is already deployed (`proxy-admin` command
+  must be in `PATH`, `naiveproxy` container—running).
+- root access.
+- `docker`, `python3`, `curl` (usually already installed with the project).
+- Server access to `github.com` (for downloading Hysteria2 and GeoIP databases).
+
+## Usage
+
+```bash
+# Full setup: client to second server + routing
+sudo bash chain-route-setup.sh
+```
+
+Script prompts in sequence:
+
+| Question | Default value |
+|---|---|
+| Second server `hysteria2://...` link | — (required) |
+| Chain type—socks/http | `socks` (client address/port from step 1) |
+| Proxy address/port of second server | `127.0.0.1:1080` |
+| Country codes for GeoIP-direct (comma-separated) | `ru` |
+| Direct domains (comma-separated) | `.ru,.su,.рф,youtube.com,youtu.be,googlevideo.com,ytimg.com,youtube-nocookie.com,ggpht.com,youtubei.googleapis.com,youtube.googleapis.com,youtubekids.com,youtubeeducation.com,gvt1.com,gvt2.com,gvt3.com,video.google.com` |
+| Domains forced through chain | — (empty; example: `gosuslugi.ru,gu-st.ru`) |
+| Block BitTorrent on NaiveProxy entry | `N` |
+
+About "Direct domains" field: entered list **completely replaces** default.
+To *add* domains to default list, start with `+`: `+vk.com,mail.ru`. Common
+mistake when pasting manually—losing `youtube.com` from start; then `youtube.com`
+itself (including `redirector.c.youtube.com`) goes through chain while
+`googlevideo.com` goes direct. Script prints final parameters before applying—verify.
+
+`gstatic.com`, `googleusercontent.com`, `googleapis.com` intentionally not in
+default: this is Google's shared infrastructure (Gmail, Drive, Play, search),
+adding them sends far more through Server1 than just YouTube. Video plays fine
+without them.
+
+If Hysteria client to second server already configured and working—script asks
+whether to reconfigure with new link, rather than silently modifying.
+
+### Additional modes
+
+```bash
+# Don't touch Hysteria client (already set up manually)—routing only
+sudo bash chain-route-setup.sh --skip-client
+
+# Update only GeoIP databases (e.g., via cron weekly—
+# IP ranges change over time) and restart container
+sudo bash chain-route-setup.sh --only-geoip
+
+# Revert routing to clean direct-only (doesn't touch Hysteria client)
+sudo bash chain-route-setup.sh --undo
+```
+
+To change second server or exclusion list later—simply run script again without
+flags; it rebuilds everything with new answers.
+
+## Post-application checks
+
+```bash
+systemctl status hysteria-client        # client to second server alive?
+systemctl status hysteria-server        # native Hysteria2 entry alive?
+docker logs naiveproxy --tail 20        # NaiveProxy started without errors?
+cat /opt/naiveproxy/config/config.json  # final NaiveProxy config with dns/outbounds/route
+cat /etc/hysteria/config.yaml           # final Hysteria2 config with outbounds/acl
+```
+
+Live routing test on Hysteria2 side—enable debug logging:
+
+```bash
+journalctl -u hysteria-server -f
+# connect with admin-HY2/test-HY2 to .ru-site and non-.ru—log shows
+# which ACL rule (direct(...) or chain_fin(all)) connection used
+```
+
+Live routing test—enable debug logging and check actual traffic destination:
+
+```bash
+sed -i 's/"level": "info"/"level": "debug"/' /opt/naiveproxy/config/config.json
+docker restart naiveproxy
+docker logs -f --since 0s naiveproxy
+# connect with client to any .ru-site and any non-.ru—log shows
+# router: sniffed protocol / match ... => route(direct) for .ru,
+# and outbound/socks[chain-fin] for others
+
+# restore to prevent disk filling:
+sed -i 's/"level": "debug"/"level": "info"/' /opt/naiveproxy/config/config.json
+docker restart naiveproxy
+```
+
+Final IP check—from two different clients visit `ifconfig.me` / `myip.com`:
+- request to `.ru`-domain or YouTube → Server1 IP (RU);
+- any other request → IPv4 Server2 address (second server in chain), same for
+  all clients (mobile and desktop)—this is what `domain_resolver: ipv4_only` fixes.
+
+Quick test of both branches from client console (through proxy):
+
+```bash
+curl -s https://api.ipify.org                                      # → Server2 IP (chain)
+curl -s http://redirector.c.youtube.com/report_mapping | head -c 120  # → Server1 IP (direct)
+```
+
+`redirector.c.youtube.com/report_mapping` returns IP that Google sees request from—
+convenient for checking YouTube branch specifically. Error `curl: (23) Failure
+writing output` with `| head`—harmless (head closed pipe). Run test from **both**
+client types—NaiveProxy and HY2 profile—they go through different rule engines.
+
+## Implementation details
+
+- **Why `sniff` is needed.** NaiveProxy is HTTP CONNECT tunnel. Some VPN/proxy
+  clients on devices resolve DNS locally and send server bare IP instead of
+  domain—then `domain_suffix` rule has nothing to compare. `sniff` reads actual
+  domain from TLS ClientHello SNI (or HTTP Host for plain HTTP) directly from
+  stream, regardless what was sent in CONNECT—substitutes it for further routing,
+  not changing actual connection address.
+- **Why GeoIP, not just domains.** Some traffic has no domain (IP access, some
+  P2P) or SNI hidden (ECH). GeoIP by country IP ranges catches such cases as
+  backup to domain rules.
+- **Why `domain_resolver: ipv4_only`, not "leave as-is".** Without explicit
+  resolving, sing-box passes domain as-is to SOCKS5/HTTP proxy of second server,
+  letting IT decide IPv4 or IPv6—different clients see different exit addresses
+  depending on entry point. Explicit `domain_resolver` forces sing-box to resolve
+  domain to A-record and pass ready IPv4 address downward.
+- **Why Hysteria2 side uses different GeoIP database.** Native Hysteria2 uses
+  not `sing-geoip`-files (tuned for sing-box format, `.srs`), but its own ACL
+  engine with `acl.geoip: <geoip.dat path>` field—compatible file (single,
+  all countries, V2Ray/Xray format) script downloads from
+  [`Loyalsoldier/geoip`](https://github.com/Loyalsoldier/geoip) to
+  `/etc/hysteria/geoip.dat`. Explicitly stated path (not left empty)—to not
+  depend on Hysteria2 auto-downloading to working directory on startup
+  (`WorkingDirectory=` in systemd unit stays unchanged) and so `--only-geoip`
+  can update it same clear way as sing-box `.srs`-files.
+- **Why Hysteria2 ACL has `outboundName(matcher)` syntax, not `route.rules` like
+  sing-box.** Two independent rule engines from different projects—`render_singbox()`
+  generates JSON for `sing-box` (`route.rules`/`rule_set`), `render_hysteria()`—YAML
+  for official `hysteria` binary (`acl.inline`, rules like `direct(suffix:example.com)`,
+  `direct(geoip:ru)`, catch-all `chain_fin(all)` last, rules checked by order, first
+  match wins). Outbound name—`chain_fin` with underscore: Hysteria2 ACL parser
+  doesn't accept dash in name, `chain-fin(all)` fails with `invalid syntax`.
+- **Why Hysteria2 needs server-side `sniff`.** Unlike sing-box, Hysteria2 ACL
+  by default matches only what client sent in connection request. Many HY2 clients
+  (including desktop with system TUN) resolve DNS locally and send server bare IP—
+  then `direct(suffix:...)` has nothing to compare, `geoip:ru` for Google address
+  doesn't match, YouTube goes to `chain_fin(all)`. In `hysteria-server` logs this
+  shows as `reqAddr` with IP-addresses instead of domains. Since Hysteria 2.6.0
+  there's server-side `sniff` option (HTTP Host / TLS SNI / QUIC); script enables
+  it with `rewriteDomain: false`—domain used only for ACL, connection goes to
+  address client sent (like `sniff` without override in sing-box). If `hysteria
+  version` < 2.6.0, script warns and doesn't enable sniff—update binary
+  (`bash <(curl -fsSL https://get.hy2.sh/)`).
+- **Why "force through chain" domains come first.** In both engines first matched
+  rule wins. `gosuslugi.ru` matches both `.ru` and `geoip:ru`, so only way to send
+  to Server2—`chain-fin`/`chain_fin(suffix:...)` rule before all direct rules.
+  Note that many Russian services (State Services/EASIA among them) periodically
+  restrict foreign IP access—you'll get a stub or captcha; not a routing error.
+- **Permissions on `geoip.dat`.** `hysteria-server` in project runs under `hysteria`
+  user in systemd sandbox (`ProtectSystem=strict`, `ReadOnlyPaths=/etc/hysteria`).
+  File `/etc/hysteria/geoip.dat` must be readable by this user—script sets `644`.
+  If file is `640 root:root` (e.g., after manual `mv` from `/tmp`), server enters
+  restart loop with `open /etc/hysteria/geoip.dat: permission denied`; reverting
+  `proxy-admin apply` to previous config **won't help**—old config references same
+  file. Fix with `chmod 644 /etc/hysteria/geoip.dat`.
+- **sing-box syntax changes between versions.** Script written for sing-box 1.13.x
+  syntax: `action: "sniff"` in `route.rules` (not `sniff`/`sniff_override_destination`
+  on inbound—removed in 1.13) and `domain_resolver` on outbound (not `domain_strategy`—
+  deprecated in 1.12, requires `ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true`
+  from some version). After updating `sing-box` image in project, if `proxy-admin apply`
+  fails with `FATAL` about deprecated/legacy fields—script needs updating for new
+  syntax (usually sing-box directly gives migration link in error text:
+  `https://sing-box.sagernet.org/migration/`).
+
+## Common issues
+
+**"`proxy-admin apply` says "hysteria-server didn't come up with new config—reverted".**
+Check `journalctl -u hysteria-server -n 40 --no-pager`. Common causes:
+`permission denied` on `geoip.dat` (see above, `chmod 644`); `invalid syntax`
+in `acl.inline`—usually dash in outbound name or typo in domain.
+After `apply` always check `systemctl is-active hysteria-server`:
+if `activating`, server stuck in restart loop, HY2 profiles don't work, though
+NaiveProxy entry alive.
+
+**YouTube goes through Server2 with HY2 client, but direct with NaiveProxy.**
+This symptom means missing `sniff` on Hysteria2 side: in
+`journalctl -u hysteria-server -f` `reqAddr`—bare IPs. Check
+`hysteria version` (need ≥ 2.6.0) and `grep -A3 '^sniff:' /etc/hysteria/config.yaml`.
+
+**YouTube goes through Server2 from both clients.** Likely `youtube.com` dropped
+from domain list. Check:
+`grep -c '"youtube.com"' /opt/naiveproxy/config/config.json` and
+`grep -c 'suffix:youtube.com)' /etc/hysteria/config.yaml`—both should return `1`.
+
+**Logs full of `bittorrent` / `TCP error ... i/o timeout` on ports 6881, 51413.**
+Some client running torrent client through proxy; foreign peers going through
+Server2. Either enable reject BitTorrent in script (NaiveProxy entry) or disable
+proxy in torrent client.
+
+**Manual edits between markers disappear.** By design: any script run rebuilds
+both blocks completely. Anything to preserve must be script parameter (domains,
+countries, forced chain, BitTorrent), not manual `proxy_admin.py` edit.
+
+## Backups
+
+Before each edit, script saves backup of patched file next to it:
+`tools/proxy_admin.py.bak-<date-time>` (in git clone) and
+`/opt/proxy/tools/proxy_admin.py.bak-<date-time>` (in installed copy).
+Script doesn't auto-delete old backups—clean them manually if many accumulate.
