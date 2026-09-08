@@ -1,4 +1,4 @@
-# hysteria_naive v2 — установка и настройка VPN на VDS (Hysteria2 + NaiveProxy)
+# Hysteria_naive v2 — установка и настройка VPN на VDS (Hysteria2 + NaiveProxy)
 
 **Готовый скрипт, чтобы поднять VPN на VDS и создать свой личный VPN-сервер: Hysteria2 + NaiveProxy в Docker, файрвол, бэкапы и Telegram-бот «из коробки».**
 
