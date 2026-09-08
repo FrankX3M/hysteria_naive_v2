@@ -1,9 +1,9 @@
-# hysteria_naive v3
+# hysteria_naive v2
 
 Установщик и инструменты управления связкой **Hysteria2 + NaiveProxy (sing-box в Docker)** с port hopping,
 Telegram-ботом, watchdog'ом, зашифрованными бэкапами, Fail2ban и nftables-файрволом.
 
-v3 — переработка v2 по итогам [архитектурного анализа](docs/ARCHITECTURE.md#что-изменилось-относительно-v2):
+v2 — переработка по итогам [архитектурного анализа](docs/ARCHITECTURE.md#что-изменилось-относительно-v2):
 модульный установщик, единый файл состояния `/etc/proxy/`, конфиги как производные артефакты,
 аутентификация Hysteria2 без рестартов, сервисы не от root, файрвол с `policy drop`.
 
@@ -95,7 +95,7 @@ tools/
   proxy_admin.py        единая логика управления (CLI + библиотека), рендер конфигов
   proxy_authd.py        HTTP-аутентификация Hysteria2 (stdlib)
   proxy_bot.py          Telegram-бот
-  migrate_v2.py         конвертация бэкапа v2 → v3 (пароли и пользователи сохраняются)
+  migrate_v2.py         конвертация бэкапа v1 → v2 (пароли и пользователи сохраняются)
   requirements.txt      пины python-зависимостей
 maintenance/            serveraudit.sh (read-only), servercleanup.sh + unit/timer
 tests/                  pytest (логика, authd, ссылки) + test_templates.sh (рендер, nft -c, юниты)
