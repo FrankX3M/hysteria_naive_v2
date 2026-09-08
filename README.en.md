@@ -21,6 +21,18 @@ Hysteria2 authentication without restarts, services not from root, firewall with
 Migration from v1 — [step-by-step guide for running server](docs/RUNBOOK.md)
 or [brief migration reference](docs/MIGRATION.md).
 
+## 🚀 Quick Start (TL;DR)
+ 
+```bash
+git clone https://github.com/FrankX3M/hysteria_naive_v2.git
+cd hysteria_naive_v2
+sudo ./install.sh
+```
+ 
+You'll need: Debian 11/12 or Ubuntu 22.04/24.04, root access, ≥ 1 GB RAM, and a domain with an A record pointing to the server. The installer asks a few questions and deploys Hysteria2 + NaiveProxy for you.
+ 
+Full details, non-interactive mode, and resuming after a failed step — see the [full "Quick Start" section](#quick-start) below.
+
 ## Table of Contents
 
 - [What Gets Installed](#what-gets-installed)
